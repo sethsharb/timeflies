@@ -479,7 +479,13 @@ $('edit-trip-save').addEventListener('click',()=>{
 });
 
 // ── Trip detail ───────────────────────────────────────
-function openTrip(id){tripId=id;dayIdx=0;pushScreen('s-trip');renderTrip()}
+function openTrip(id){
+  tripId=id;dayIdx=0;
+  pushScreen('s-trip');
+  // Reset scroll immediately before render to prevent flash of wrong position
+  const vp=$('d-vp');if(vp)vp.scrollLeft=0;
+  renderTrip();
+}
 function getTrip(){return DB.data.trips.find(t=>t.id===tripId)}
 function renderTrip(){
   const trip=getTrip();if(!trip)return;
@@ -500,6 +506,8 @@ function renderTrack(trip){
   const track=$('d-track'),nd=$('no-days');track.innerHTML='';
   if(!trip.days.length){nd.style.display='';return}nd.style.display='none';
   trip.days.forEach((day,i)=>track.appendChild(makeDayCard(day,i,trip)));
+  // Wait for layout then scroll instantly to active day
+  setTimeout(()=>scrollToDay(dayIdx,true),50);
 }
 
 function makeDayCard(day,di,trip){
@@ -1052,14 +1060,29 @@ function refreshCard(di){
 // ── Navigation ────────────────────────────────────────
 let programmaticScroll=false;
 
-function scrollToDay(i){
+function getCardWidth(){
   const vp=$('d-vp');
-  const firstCard=vp.querySelector('.day-card');
-  if(!firstCard)return;
+  if(!vp)return 380;
+  // Try rendered card first (most reliable)
+  const card=vp.querySelector('.day-card');
+  if(card&&card.offsetWidth>1)return card.offsetWidth;
+  // Fall back to viewport width on mobile, col-w on desktop
+  if(window.innerWidth<700)return window.innerWidth;
+  return 380; // --col-w default
+}
+
+function scrollToDay(i, instant=false){
+  const vp=$('d-vp');if(!vp)return;
   programmaticScroll=true;
-  const w=firstCard.getBoundingClientRect().width||firstCard.offsetWidth;
-  vp.scrollTo({left:i*w,behavior:'smooth'});
-  setTimeout(()=>{programmaticScroll=false},500);
+  clearTimeout(scrollEndTimer); // prevent scroll listener from firing during our scroll
+  const w=getCardWidth();
+  const target=i*w;
+  if(instant||true){ // always use instant — smooth scroll fights with scroll-snap
+    vp.scrollLeft=target;
+  } else {
+    vp.scrollTo({left:target,behavior:'smooth'});
+  }
+  setTimeout(()=>{programmaticScroll=false;},150);
 }
 
 function goDay(i){
@@ -1070,7 +1093,8 @@ function goDay(i){
   document.querySelectorAll('.day-card').forEach((c,j)=>c.classList.toggle('active-col',j===i));
   const pill=$('d-pills').querySelectorAll('.day-pill')[i];
   if(pill)pill.scrollIntoView({behavior:'smooth',inline:'center',block:'nearest'});
-  scrollToDay(i);
+  // Set scrollLeft directly — no animation, no race with scroll-snap
+  scrollToDay(i,true);
 }
 
 // Sync pill/dot when user manually swipes
@@ -1080,9 +1104,7 @@ $('d-vp').addEventListener('scroll',()=>{
   clearTimeout(scrollEndTimer);
   scrollEndTimer=setTimeout(()=>{
     const vp=$('d-vp');
-    const firstCard=vp.querySelector('.day-card');
-    if(!firstCard)return;
-    const w=firstCard.getBoundingClientRect().width||firstCard.offsetWidth;
+    const w=getCardWidth();
     if(w===0)return;
     const i=Math.round(vp.scrollLeft/w);
     const trip=getTrip();
@@ -1108,11 +1130,13 @@ $('btn-trip-files').addEventListener('click',()=>{
   tripFilesId=tripId;
   const trip=getTrip();if(!trip)return;
   $('tripfiles-nav-t').textContent=trip.name;
-  pushScreen('s-tripfiles');
+  $('s-tripfiles').classList.remove('hidden');
   renderTripFiles(trip);
   renderTripChecklist(trip);
 });
-$('btn-back-tf').addEventListener('click',()=>popScreen());
+$('btn-back-tf').addEventListener('click',()=>{
+  $('s-tripfiles').classList.add('hidden');
+});
 
 // Tab switching removed — files and checklist are now stacked on one page
 

@@ -20,11 +20,11 @@
   --shadow-sm:0 1px 3px rgba(0,0,0,.3);--shadow-md:0 4px 16px rgba(0,0,0,.4)
 }}
 html,body{height:100%;overflow:hidden;font-family:var(--fb);background:var(--bg);color:var(--text1);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
-#app{height:100%;position:relative;overflow:hidden}
+#app{height:100%;position:relative;overflow:hidden;isolation:isolate}
 
 /* ── Screens ── */
-.screen{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg);transition:transform .38s cubic-bezier(.32,.72,0,1);will-change:transform}
-.screen.hidden{transform:translateX(100%);pointer-events:none}
+.screen{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg);transition:transform .38s cubic-bezier(.32,.72,0,1);will-change:transform;overflow:hidden}
+.screen.hidden{transform:translateX(100%);pointer-events:none;visibility:hidden}
 .screen.back{transform:translateX(-28%);pointer-events:none}
 
 /* ── Nav ── */
@@ -112,7 +112,13 @@ html,body{height:100%;overflow:hidden;font-family:var(--fb);background:var(--bg)
   .day-card.active-col{background:var(--bg)}
 }
 
-/* Day hero — whole hero is clickable for photo, drag handle stays */
+/* No spacer needed - last card snaps naturally */
+.days-track-end{display:none}
+/* Trip files panel — fixed overlay, NOT part of screen stack so s-trip never gets .back */
+.tripfiles-panel{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .38s cubic-bezier(.32,.72,0,1);will-change:transform}
+.tripfiles-panel.hidden{transform:translateX(100%);pointer-events:none;visibility:hidden}
+.tripfiles-panel:not(.hidden){transform:translateX(0);pointer-events:all;visibility:visible}
+
 .hero-drag{position:absolute;top:12px;right:12px;width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,.32);backdrop-filter:blur(8px);border:none;cursor:grab;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.8);touch-action:none}
 .hero-drag:active{cursor:grabbing}
 .hero-drag svg{width:14px;height:14px}
