@@ -35,20 +35,25 @@ function toast(msg,d=2200){const el=$('toast');el.textContent=msg;el.classList.a
 // ── Supabase sync ─────────────────────────────────────
 // We store the entire trips JSON as one row in a simple key/value table.
 // This requires a one-time SQL setup (see setup wizard, step 2b addendum).
-const SB_TABLE='app_data';
-const SB_KEY_ROW='trips_v3';
 
-async function sbFetch(path,opts={}){
-  if(!SB_URL||!SB_KEY)return null;
+
+async function sbFetch(path, method='GET', body=null, extraHeaders={}){
+  if(!SB_URL||!SB_KEY)return{ok:false,data:null,err:'No credentials'};
   try{
-    const r=await fetch(`${SB_URL}/rest/v1/${path}`,{
-      headers:{'apikey':SB_KEY,'Authorization':`Bearer ${SB_KEY}`,'Content-Type':'application/json','Prefer':'return=minimal',...(opts.headers||{})},
-      ...opts
-    });
-    if(!r.ok)return null;
+    const headers={
+      'apikey':SB_KEY,
+      'Authorization':`Bearer ${SB_KEY}`,
+      'Content-Type':'application/json',
+      ...extraHeaders
+    };
+    const opts={method,headers};
+    if(body)opts.body=JSON.stringify(body);
+    const r=await fetch(`${SB_URL}/rest/v1/${path}`,opts);
     const txt=await r.text();
-    return txt?JSON.parse(txt):null;
-  }catch{return null}
+    const data=txt?JSON.parse(txt):null;
+    if(!r.ok){console.warn('[Sync] HTTP',r.status,path,txt);return{ok:false,data,err:r.status};}
+    return{ok:true,data};
+  }catch(e){console.warn('[Sync] fetch error',e);return{ok:false,data:null,err:e.message};}
 }
 
 const DB={
@@ -65,29 +70,41 @@ const DB={
   _pushTimer:null,
   _pushRemote(){
     clearTimeout(this._pushTimer);
-    this._pushTimer=setTimeout(async()=>{
-      if(!SB_URL||!SB_KEY)return;
-      const payload=JSON.stringify({key:SB_KEY_ROW,value:JSON.stringify(this._d)});
-      // upsert
-      await sbFetch(`${SB_TABLE}?key=eq.${SB_KEY_ROW}`,{
-        method:'PATCH',
-        headers:{'Prefer':'return=minimal'},
-        body:payload
-      });
-    },800);
+    this._pushTimer=setTimeout(()=>this._doPush(),1000);
+  },
+  async _doPush(){
+    if(!SB_URL||!SB_KEY){console.log('[Sync] No credentials, skip push');return;}
+    const val=JSON.stringify(this._d);
+    // Upsert: INSERT + ON CONFLICT update
+    const res=await sbFetch('app_data','POST',
+      {key:'trips_v3',value:val},
+      {'Prefer':'resolution=merge-duplicates,return=minimal'}
+    );
+    if(res.ok)console.log('[Sync] Push OK');
+    else console.warn('[Sync] Push failed',res.err);
   },
   async syncFromRemote(){
-    if(!SB_URL||!SB_KEY)return false;
-    const rows=await sbFetch(`${SB_TABLE}?key=eq.${SB_KEY_ROW}&select=value`);
-    if(!rows||!rows.length)return false;
+    if(!SB_URL||!SB_KEY){console.log('[Sync] No credentials');return false;}
+    console.log('[Sync] Pulling from',SB_URL);
+    const res=await sbFetch('app_data?key=eq.trips_v3&select=value','GET');
+    if(!res.ok){console.warn('[Sync] Pull failed',res.err);return false;}
+    const rows=res.data;
+    console.log('[Sync] Got rows:',rows?.length);
+    if(!rows||!rows.length){
+      // No remote data yet — push local data up
+      console.log('[Sync] No remote row, seeding from local');
+      await this._doPush();
+      return false;
+    }
     try{
       const remote=JSON.parse(rows[0].value);
       if(remote&&remote.trips){
         this._d=remote;
         localStorage.setItem('trips_v3',JSON.stringify(remote));
+        console.log('[Sync] Pulled',remote.trips.length,'trips');
         return true;
       }
-    }catch{}
+    }catch(e){console.warn('[Sync] Parse error',e);}
     return false;
   }
 };
@@ -171,20 +188,16 @@ $('sw-done').addEventListener('click',async()=>{
   if(url&&key){
     SB_URL=url;SB_KEY=key;
     localStorage.setItem('sb_url',url);localStorage.setItem('sb_key',key);
-    // Seed the remote row with current local data (INSERT, ignore conflict)
-    const payload=JSON.stringify({key:SB_KEY_ROW,value:JSON.stringify(DB.data)});
-    const result=await sbFetch(`${SB_TABLE}`,{
-      method:'POST',
-      headers:{'Prefer':'resolution=ignore-duplicates,return=minimal'},
-      body:payload
-    });
-    // Try to sync down in case another device already has data
+    toast('Connecting…');
+    // Try to pull first; if nothing there, push local data up
     const synced=await DB.syncFromRemote();
     if(synced){
       DB.data.trips.forEach(t=>{resequenceDates(t);if(!t.files)t.files=[];if(!t.checklist)t.checklist=[];});
       renderTrips();
+      toast('✓ Synced from cloud!');
+    } else {
+      toast('✓ Connected — data uploaded');
     }
-    toast('✓ Supabase connected & synced!');
   }
   $('setup').classList.add('hidden');
 });
