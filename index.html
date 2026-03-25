@@ -48,8 +48,8 @@ CREATE TABLE app_data (
 );
 ALTER TABLE app_data ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "open" ON app_data FOR ALL USING (true) WITH CHECK (true);</div>
-      <br><b>c.</b> Paste your API keys below, then click <b>Save &amp; Start Planning</b>.<br><br>
-      <b>d.</b> <b>Project Settings → API</b> → paste keys below:
+      <br><b>c.</b> <b>Storage → New bucket</b> → name <code>trip-media</code> → turn on <b>Public bucket</b> → Create. Then <b>Policies → New policy → trip-media → Full customization</b> → name it <code>public</code>, check ALL operations, expression <code>true</code> → Save. <em>(This lets photos and files sync between devices.)</em><br><br>
+      <b>d.</b> <b>Project Settings → API</b> → paste your Project URL and anon key below:
       <div class="sw-inputs">
         <input type="url" class="f-inp" id="sw-url" placeholder="https://xxxxxxxxxxxx.supabase.co" autocomplete="off" spellcheck="false">
         <input type="text" class="f-inp" id="sw-key" placeholder="eyJhbGciOi... (anon / public key)" autocomplete="off" spellcheck="false">

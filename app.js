@@ -56,6 +56,33 @@ async function sbFetch(path, method='GET', body=null, extraHeaders={}){
   }catch(e){console.warn('[Sync] fetch error',e);return{ok:false,data:null,err:e.message};}
 }
 
+// Upload a file to Supabase Storage, return permanent public URL or null
+async function uploadToStorage(file, path){
+  if(!SB_URL||!SB_KEY)return null;
+  try{
+    const r=await fetch(`${SB_URL}/storage/v1/object/trip-media/${path}`,{
+      method:'POST',
+      headers:{
+        'apikey':SB_KEY,
+        'Authorization':`Bearer ${SB_KEY}`,
+        'Content-Type':file.type||'application/octet-stream',
+        'x-upsert':'true'
+      },
+      body:file
+    });
+    if(!r.ok){console.warn('[Storage] Upload failed',r.status,await r.text());return null;}
+    return`${SB_URL}/storage/v1/object/public/trip-media/${path}`;
+  }catch(e){console.warn('[Storage] Upload error',e);return null;}
+}
+
+// Upload and return URL — uses permanent URL if Supabase available, else local blob
+async function uploadFile(file, storagePath){
+  const permanentUrl=await uploadToStorage(file, storagePath);
+  if(permanentUrl)return{url:permanentUrl, blob:null};
+  // offline fallback
+  return{url:null, blob:URL.createObjectURL(file)};
+}
+
 const DB={
   _d:null,
   get data(){return this._d||(this._d=this._load())},
@@ -253,12 +280,18 @@ $('fab').addEventListener('click',openNewTrip);
 $('tc-file').addEventListener('change',function(){if(!this.files[0])return;$('tc-img').src=URL.createObjectURL(this.files[0]);$('tc-prev').style.display='';$('tc-upload').style.display='none'});
 $('tc-clear').addEventListener('click',()=>{$('tc-file').value='';$('tc-prev').style.display='none';$('tc-upload').style.display=''});
 $('trip-cancel').addEventListener('click',closeSheet);
-$('trip-save').addEventListener('click',()=>{
+$('trip-save').addEventListener('click',async()=>{
   const name=$('t-name').value.trim();if(!name){$('t-name').focus();return}
   const id=uid();
-  if($('tc-file').files[0])blobs['tc_'+id]=URL.createObjectURL($('tc-file').files[0]);
-  DB.data.trips.unshift({id,name,startDate:$('t-s').value,endDate:$('t-e').value,coverUrl:'',emoji:'✈️',days:[]});
+  const trip={id,name,startDate:$('t-s').value,endDate:$('t-e').value,coverUrl:'',emoji:'✈️',files:[],checklist:[],days:[]};
+  DB.data.trips.unshift(trip);
   DB.save();closeSheet();setTimeout(renderTrips,220);
+  if($('tc-file').files[0]){
+    const f=$('tc-file').files[0];
+    const {url,blob}=await uploadFile(f,`cover/${id}_${Date.now()}`);
+    if(url){trip.coverUrl=url;DB.save();renderTrips();}
+    else blobs['tc_'+id]=blob;
+  }
 });
 
 // ── Edit trip sheet (dates + day management) ──────────
@@ -422,7 +455,13 @@ $('edit-trip-save').addEventListener('click',()=>{
   if(name)trip.name=name;
   trip.emoji=$('et-emoji').textContent||trip.emoji;
   // save cover photo if changed
-  if($('etc-file').files[0])blobs['tc_'+trip.id]=URL.createObjectURL($('etc-file').files[0]);
+  if($('etc-file').files[0]){
+    const f=$('etc-file').files[0];
+    uploadFile(f,`cover/${trip.id}_${Date.now()}`).then(({url,blob})=>{
+      if(url){trip.coverUrl=url;DB.save();renderTrips();}
+      else blobs['tc_'+trip.id]=blob;
+    });
+  }
   const newStart=$('et-s').value;
   if(newStart&&newStart!==trip.startDate){trip.startDate=newStart;resequenceDates(trip);}
   else if(newStart){trip.startDate=newStart;}
@@ -524,8 +563,11 @@ function makeDayCard(day,di,trip){
 function mapPrevHtml(day){
   const b=blobs['map_'+day.id];
   if(b)return blobs['map_t_'+day.id]==='img'?`<img src="${b}" alt="map">`:`<iframe src="${b}"></iframe>`;
-  if(day.mapPdfUrl)return`<iframe src="${day.mapPdfUrl}"></iframe>`;
-  return null; // no map — show compact row instead
+  if(day.mapPdfUrl){
+    const isImg=/\.(jpe?g|png|gif|webp)$/i.test(day.mapPdfUrl);
+    return isImg?`<img src="${day.mapPdfUrl}" alt="map">`:`<iframe src="${day.mapPdfUrl}"></iframe>`;
+  }
+  return null;
 }
 
 // Build a custom smart time widget — type 430 → 4:30 PM, fluid tab-less flow
@@ -653,14 +695,25 @@ function actHtml(a, trip){
   const previewNotes=a.notes?`<div class="act-notes-preview">${a.notes}</div>`:'';
 
   const filesList=(a.files||a.images||[]);
-  const isImg=id=>!blobs['fname_'+id]||/\.(jpe?g|png|gif|webp|heic|avif)$/i.test(blobs['fname_'+id]||'');
-  const imgThumbsHtml=filesList.filter(id=>isImg(id)).map(id=>`<img class="act-img" src="${blobs['img_'+id]||id}" alt="" data-fid="${id}">`).join('');
-  const fileRowsHtml=filesList.filter(id=>!isImg(id)).map(id=>{
-    const fname=blobs['fname_'+id]||'File';
+  // An entry is either a permanent https:// URL or a local uid string
+  const isPermanentUrl=v=>typeof v==='string'&&v.startsWith('http');
+  const getImgSrc=v=>isPermanentUrl(v)?v:(blobs['img_'+v]||v);
+  const isImgEntry=v=>{
+    if(isPermanentUrl(v))return/\.(jpe?g|png|gif|webp|heic|avif)/i.test(v);
+    return/\.(jpe?g|png|gif|webp|heic|avif)$/i.test(blobs['fname_'+v]||'')||(!blobs['fname_'+v]&&!!blobs['img_'+v]);
+  };
+  const getFileName=v=>{
+    if(isPermanentUrl(v))return decodeURIComponent(v.split('/').pop().replace(/^\d+_/,''));
+    return blobs['fname_'+v]||'File';
+  };
+  const imgThumbsHtml=filesList.filter(v=>isImgEntry(v)).map(v=>`<img class="act-img" src="${getImgSrc(v)}" alt="" data-fid="${v}">`).join('');
+  const fileRowsHtml=filesList.filter(v=>!isImgEntry(v)).map(v=>{
+    const fname=getFileName(v);
     const isPdf=/\.pdf$/i.test(fname),isDoc=/\.(doc|docx)$/i.test(fname);
     const ic=isPdf?'pdf':isDoc?'doc':'other';
     const icon=isPdf?'📄':isDoc?'📝':'📎';
-    return`<div class="act-attach-row" data-fid="${id}"><div class="act-attach-icon ${ic}">${icon}</div><span class="act-attach-name">${fname}</span><button class="act-attach-del" data-fid="${id}" data-type="file" onclick="event.stopPropagation()">✕</button></div>`;
+    const href=isPermanentUrl(v)?v:(blobs['img_'+v]||'#');
+    return`<a class="act-attach-row" href="${href}" target="_blank" rel="noopener" data-fid="${v}"><div class="act-attach-icon ${ic}">${icon}</div><span class="act-attach-name">${fname}</span><button class="act-attach-del" data-fid="${v}" data-type="file" onclick="event.preventDefault();event.stopPropagation()">✕</button></a>`;
   }).join('');
   const linkRowsHtml=(a.links||[]).map(l=>`<a class="act-attach-row" href="${l.url}" target="_blank" rel="noopener"><div class="act-attach-icon link"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 3H3a1 1 0 00-1 1v7a1 1 0 001 1h7a1 1 0 001-1V8"/><path d="M9 2h3v3M8 6l4-4"/></svg></div><span class="act-attach-name">${l.label||l.url}</span><button class="act-attach-del" data-lid="${l.id}" data-aid="${a.id}" data-type="link" onclick="event.preventDefault();event.stopPropagation()">✕</button></a>`).join('');
   const hasItems=imgThumbsHtml||fileRowsHtml||linkRowsHtml;
@@ -753,11 +806,13 @@ function bindCard(el,day,di,trip){
     if(e.target.closest('.hero-drag')||e.target.closest('.hero-title-inp'))return;
     el.querySelector(`#hf-${di}`).click();
   });
-  el.querySelector(`#hf-${di}`).addEventListener('change',function(){
+  el.querySelector(`#hf-${di}`).addEventListener('change',async function(){
     if(!this.files[0])return;
-    blobs['dh_'+day.id]=URL.createObjectURL(this.files[0]);
-    const hint=el.querySelector('.hero-photo-hint');
-    if(hint)hint.textContent='Tap to change photo';
+    const f=this.files[0];
+    const path=`hero/${day.id}_${Date.now()}`;
+    const {url,blob}=await uploadFile(f,path);
+    if(url){day.heroUrl=url;DB.save();}
+    else blobs['dh_'+day.id]=blob;
     refreshCard(di);
   });
 
@@ -878,15 +933,16 @@ function bindCard(el,day,di,trip){
 
   // Add file/photo
   el.querySelectorAll('.act-file-input').forEach(inp=>{
-    inp.addEventListener('change',function(){
+    inp.addEventListener('change',async function(){
       const act=findAct(day,this.dataset.aid);if(!act)return;
       if(!act.files)act.files=act.images||[];
-      Array.from(this.files).forEach(f=>{
+      for(const f of Array.from(this.files)){
         const id=uid();
-        blobs['img_'+id]=URL.createObjectURL(f);
-        blobs['fname_'+id]=f.name;
-        act.files.push(id);
-      });
+        const path=`activity/${act.id}/${id}_${f.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+        const {url,blob}=await uploadFile(f,path);
+        if(url){act.files.push(url);}
+        else{blobs['img_'+id]=blob;blobs['fname_'+id]=f.name;act.files.push(id);}
+      }
       DB.save();refreshCard(di);
     });
   });
@@ -1072,11 +1128,11 @@ function renderTripFiles(trip){
         <div class="file-size">${f.size||''}</div>
       </div>
       <button class="file-del" data-idx="${i}" aria-label="Delete">✕</button>`;
-    // Click to open/preview blob
+    // Click to open — use permanent URL if available, else local blob
     card.addEventListener('click',e=>{
       if(e.target.closest('.file-del'))return;
-      const blobUrl=blobs['tripfile_'+tripId+'_'+i];
-      if(blobUrl)window.open(blobUrl,'_blank');
+      const openUrl=f.url||blobs['tripfile_'+tripId+'_'+i];
+      if(openUrl)window.open(openUrl,'_blank');
     });
     card.querySelector('.file-del').addEventListener('click',e=>{
       e.stopPropagation();
@@ -1088,16 +1144,18 @@ function renderTripFiles(trip){
 }
 
 // File upload
-$('trip-file-input').addEventListener('change',function(){
+$('trip-file-input').addEventListener('change',async function(){
   if(!this.files.length)return;
   const trip=getTripFiles();if(!trip)return;
   if(!trip.files)trip.files=[];
-  Array.from(this.files).forEach(f=>{
-    const idx=trip.files.length;
+  for(const f of Array.from(this.files)){
     const sizeStr=f.size>1024*1024?(f.size/1024/1024).toFixed(1)+' MB':(f.size/1024).toFixed(0)+' KB';
-    trip.files.push({name:f.name,size:sizeStr});
-    blobs[`tripfile_${tripId}_${idx}`]=URL.createObjectURL(f);
-  });
+    const idx=trip.files.length;
+    const path=`tripfile/${tripId}/${Date.now()}_${f.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+    const {url,blob}=await uploadFile(f,path);
+    trip.files.push({name:f.name,size:sizeStr,url:url||null});
+    if(blob)blobs[`tripfile_${tripId}_${idx}`]=blob;
+  }
   DB.save();renderTripFiles(trip);
   this.value='';
 });
@@ -1341,8 +1399,8 @@ let pendingActEnd='';
 function resetActSheet(){
   // Revoke any pending file blob URLs to avoid memory leaks
   pendingActFiles.forEach(f=>{
-    if(blobs['img_'+f.id])URL.revokeObjectURL(blobs['img_'+f.id]);
-    delete blobs['img_'+f.id];delete blobs['fname_'+f.id];
+    if(blobs['img_'+f.id]){URL.revokeObjectURL(blobs['img_'+f.id]);delete blobs['img_'+f.id];}
+    delete blobs['fname_'+f.id];
   });
   $('a-name').value='';$('a-notes').value='';$('a-details').value='';
   $('a-files').value='';
@@ -1427,12 +1485,13 @@ function bindSheetTimeWidget(widget, onSave){
   });
 }
 
-$('a-files').addEventListener('change',function(){
-  Array.from(this.files).forEach(f=>{
+$('a-files').addEventListener('change',async function(){
+  for(const f of Array.from(this.files)){
     const id=uid();
+    // Store locally for preview while uploading
     const blobUrl=URL.createObjectURL(f);
     blobs['img_'+id]=blobUrl;blobs['fname_'+id]=f.name;
-    pendingActFiles.push({id,name:f.name});
+    pendingActFiles.push({id,name:f.name,file:f,url:null});
     const row=document.createElement('div');
     row.className='act-attach-row';row.dataset.fid=id;
     const isPdf=/\.pdf$/i.test(f.name),isDoc=/\.(doc|docx)$/i.test(f.name);
@@ -1443,7 +1502,7 @@ $('a-files').addEventListener('change',function(){
       pendingActFiles=pendingActFiles.filter(x=>x.id!==id);row.remove();
     });
     $('a-files-preview').appendChild(row);
-  });
+  }
   this.value='';
 });
 
@@ -1454,12 +1513,20 @@ $('a-add-link-btn').addEventListener('click',()=>{
 
 $('act-cancel').addEventListener('click',()=>{resetActSheet();closeSheet();});
 
-$('act-save').addEventListener('click',()=>{
+$('act-save').addEventListener('click',async()=>{
   const name=$('a-name').value.trim();if(!name){$('a-name').focus();return}
   const trip=getTrip(),day=trip.days.find(d=>d.id===ctx.did);if(!day)return;
-  const files=pendingActFiles.map(f=>f.id);
+  // Upload any pending files to storage
+  const fileRefs=[];
+  for(const pf of pendingActFiles){
+    if(pf.file){
+      const path=`activity/new/${pf.id}_${pf.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+      const {url}=await uploadFile(pf.file,path);
+      fileRefs.push(url||pf.id);
+    } else fileRefs.push(pf.id);
+  }
   const links=pendingActLinks.map(l=>({...l}));
-  day.activities.push({id:uid(),name,timeStart:pendingActStart,timeEnd:pendingActEnd,notes:$('a-notes').value.trim(),details:$('a-details').value.trim(),files,links});
+  day.activities.push({id:uid(),name,timeStart:pendingActStart,timeEnd:pendingActEnd,notes:$('a-notes').value.trim(),details:$('a-details').value.trim(),files:fileRefs,links});
   DB.save();resetActSheet();closeSheet();setTimeout(()=>refreshCard(ctx.di!=null?ctx.di:dayIdx),300);
 });
 
@@ -1495,11 +1562,17 @@ $('map-file').addEventListener('change',function(){
   p.style.display='';
 });
 $('map-cancel').addEventListener('click',closeSheet);
-$('map-save').addEventListener('click',()=>{
+$('map-save').addEventListener('click',async()=>{
   const f=$('map-file').files[0];if(!f){closeSheet();return}
   const trip=getTrip(),day=trip.days.find(d=>d.id===ctx.did);if(!day)return;
-  blobs['map_'+day.id]=URL.createObjectURL(f);
-  blobs['map_t_'+day.id]=f.type.startsWith('image/')?'img':'pdf';
+  const path=`map/${day.id}_${Date.now()}_${f.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+  const {url,blob}=await uploadFile(f,path);
+  if(url){
+    day.mapPdfUrl=url;
+  } else {
+    blobs['map_'+day.id]=blob;
+    blobs['map_t_'+day.id]=f.type.startsWith('image/')?'img':'pdf';
+  }
   DB.save();closeSheet();setTimeout(()=>refreshCard(ctx.di!=null?ctx.di:dayIdx),300);
 });
 
