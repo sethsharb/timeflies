@@ -57,8 +57,11 @@ async function sbFetch(path, method='GET', body=null, extraHeaders={}){
 }
 
 // Upload a file to Supabase Storage, return permanent public URL or null
-async function uploadToStorage(file, path){
+async function uploadToStorage(file, pathNoExt){
   if(!SB_URL||!SB_KEY)return null;
+  // Ensure the path has the right file extension
+  const ext=file.name.split('.').pop()||'bin';
+  const path=pathNoExt.includes('.')?pathNoExt:`${pathNoExt}.${ext}`;
   try{
     const r=await fetch(`${SB_URL}/storage/v1/object/trip-media/${path}`,{
       method:'POST',
@@ -70,8 +73,11 @@ async function uploadToStorage(file, path){
       },
       body:file
     });
-    if(!r.ok){console.warn('[Storage] Upload failed',r.status,await r.text());return null;}
-    return`${SB_URL}/storage/v1/object/public/trip-media/${path}`;
+    const txt=await r.text();
+    if(!r.ok){console.warn('[Storage] Upload failed',r.status,txt);return null;}
+    const publicUrl=`${SB_URL}/storage/v1/object/public/trip-media/${path}`;
+    console.log('[Storage] Uploaded →',publicUrl);
+    return publicUrl;
   }catch(e){console.warn('[Storage] Upload error',e);return null;}
 }
 
@@ -90,9 +96,11 @@ const DB={
     try{return JSON.parse(localStorage.getItem('trips_v3')||'{"trips":[]}')}
     catch{return{trips:[]}}
   },
-  save(){
+  save(immediate=false){
     localStorage.setItem('trips_v3',JSON.stringify(this._d));
+    if(immediate)return this._doPush();
     this._pushRemote();
+    return Promise.resolve();
   },
   _pushTimer:null,
   _pushRemote(){
@@ -289,7 +297,7 @@ $('trip-save').addEventListener('click',async()=>{
   if($('tc-file').files[0]){
     const f=$('tc-file').files[0];
     const {url,blob}=await uploadFile(f,`cover/${id}_${Date.now()}`);
-    if(url){trip.coverUrl=url;DB.save();renderTrips();}
+    if(url){trip.coverUrl=url;DB.save(true).then(renderTrips);}
     else blobs['tc_'+id]=blob;
   }
 });
@@ -458,7 +466,7 @@ $('edit-trip-save').addEventListener('click',()=>{
   if($('etc-file').files[0]){
     const f=$('etc-file').files[0];
     uploadFile(f,`cover/${trip.id}_${Date.now()}`).then(({url,blob})=>{
-      if(url){trip.coverUrl=url;DB.save();renderTrips();}
+      if(url){trip.coverUrl=url;DB.save(true).then(renderTrips);}
       else blobs['tc_'+trip.id]=blob;
     });
   }
@@ -811,7 +819,7 @@ function bindCard(el,day,di,trip){
     const f=this.files[0];
     const path=`hero/${day.id}_${Date.now()}`;
     const {url,blob}=await uploadFile(f,path);
-    if(url){day.heroUrl=url;DB.save();}
+    if(url){day.heroUrl=url;await DB.save(true);}
     else blobs['dh_'+day.id]=blob;
     refreshCard(di);
   });
@@ -943,7 +951,7 @@ function bindCard(el,day,di,trip){
         if(url){act.files.push(url);}
         else{blobs['img_'+id]=blob;blobs['fname_'+id]=f.name;act.files.push(id);}
       }
-      DB.save();refreshCard(di);
+      await DB.save(true);refreshCard(di);
     });
   });
 
@@ -1156,7 +1164,7 @@ $('trip-file-input').addEventListener('change',async function(){
     trip.files.push({name:f.name,size:sizeStr,url:url||null});
     if(blob)blobs[`tripfile_${tripId}_${idx}`]=blob;
   }
-  DB.save();renderTripFiles(trip);
+  await DB.save(true);renderTripFiles(trip);
   this.value='';
 });
 
@@ -1569,6 +1577,7 @@ $('map-save').addEventListener('click',async()=>{
   const {url,blob}=await uploadFile(f,path);
   if(url){
     day.mapPdfUrl=url;
+    await DB.save(true);
   } else {
     blobs['map_'+day.id]=blob;
     blobs['map_t_'+day.id]=f.type.startsWith('image/')?'img':'pdf';
