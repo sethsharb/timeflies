@@ -534,7 +534,7 @@ function makeDayCard(day,di,trip){
     <div class="day-hero" id="dh-area-${di}">
       ${heroSrc?`<img src="${heroSrc}" alt="">`:`<div style="width:100%;height:100%"></div>`}
       <div class="hero-ov"></div>
-      <div class="hero-photo-hint">${heroSrc?'Tap to change photo':''}</div>
+      <div class="hero-photo-hint">${heroSrc?'':''}</div>
       <div class="hero-content">
         <div class="hero-label" id="hl-${di}"><span style="opacity:.6;text-transform:uppercase;letter-spacing:.8px;font-size:11px">Day ${di+1}</span>${day.date?`<br>${fmtHero(day.date)}`:''}</div>
         <input class="hero-title-inp" value="${(day.title||'').replace(/"/g,'&quot;')}" placeholder="Name this day..." data-did="${day.id}">
