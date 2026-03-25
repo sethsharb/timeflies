@@ -41,40 +41,14 @@
       <b>a.</b> <a href="https://supabase.com" target="_blank">supabase.com</a> → sign up → <b>New project</b>. Any name, any region, set a password → <b>Create</b>. Wait ~2 min.<br><br>
       <b>b.</b> <b>SQL Editor</b> in sidebar → tap box below to copy → paste → click <b>Run</b>:
       <div class="sql-box" id="sql-copy">-- Run this once in Supabase SQL Editor
-CREATE TABLE trips (id TEXT PRIMARY KEY, name TEXT NOT NULL,
-  start_date TEXT, end_date TEXT, cover_url TEXT,
-  emoji TEXT DEFAULT '✈️', created_at TIMESTAMPTZ DEFAULT NOW());
-CREATE TABLE days (id TEXT PRIMARY KEY,
-  trip_id TEXT REFERENCES trips(id) ON DELETE CASCADE,
-  title TEXT, date TEXT, hero_url TEXT, map_pdf_url TEXT,
-  sort_order INT DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW());
-CREATE TABLE activities (id TEXT PRIMARY KEY,
-  day_id TEXT REFERENCES days(id) ON DELETE CASCADE,
-  name TEXT, time_start TEXT, time_end TEXT, notes TEXT, details TEXT,
-  sort_order INT DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW());
-CREATE TABLE activity_images (id TEXT PRIMARY KEY,
-  activity_id TEXT REFERENCES activities(id) ON DELETE CASCADE,
-  url TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW());
-CREATE TABLE activity_links (id TEXT PRIMARY KEY,
-  activity_id TEXT REFERENCES activities(id) ON DELETE CASCADE,
-  label TEXT, url TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW());
-CREATE TABLE checklist_items (id TEXT PRIMARY KEY,
-  day_id TEXT REFERENCES days(id) ON DELETE CASCADE,
-  text TEXT NOT NULL, done BOOLEAN DEFAULT FALSE,
-  sort_order INT DEFAULT 0, created_at TIMESTAMPTZ DEFAULT NOW());
-ALTER TABLE trips ENABLE ROW LEVEL SECURITY;
-ALTER TABLE days ENABLE ROW LEVEL SECURITY;
-ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
-ALTER TABLE activity_images ENABLE ROW LEVEL SECURITY;
-ALTER TABLE activity_links ENABLE ROW LEVEL SECURITY;
-ALTER TABLE checklist_items ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "open" ON trips FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "open" ON days FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "open" ON activities FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "open" ON activity_images FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "open" ON activity_links FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "open" ON checklist_items FOR ALL USING (true) WITH CHECK (true);</div>
-      <br><b>c.</b> <b>Storage → New bucket</b> → name <code>trip-media</code> → <b>Public bucket ON</b> → Create. Then Policies → New Policy → trip-media → Full customization → name <code>public</code>, ALL, expression <code>true</code> → Save.<br><br>
+CREATE TABLE app_data (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE app_data ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "open" ON app_data FOR ALL USING (true) WITH CHECK (true);</div>
+      <br><b>c.</b> Paste your API keys below, then click <b>Save &amp; Start Planning</b>.<br><br>
       <b>d.</b> <b>Project Settings → API</b> → paste keys below:
       <div class="sw-inputs">
         <input type="url" class="f-inp" id="sw-url" placeholder="https://xxxxxxxxxxxx.supabase.co" autocomplete="off" spellcheck="false">
