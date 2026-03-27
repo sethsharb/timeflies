@@ -502,10 +502,12 @@ function renderSwitcher(trip){
     const dot=document.createElement('div');dot.className='day-dot'+(i===dayIdx?' active':'');dots.appendChild(dot);
   });
 }
+function resizeClInps(root){root.querySelectorAll('textarea.cl-inp').forEach(ta=>{ta.style.height='0';ta.style.height=ta.scrollHeight+'px'});}
 function renderTrack(trip){
   const track=$('d-track'),nd=$('no-days');track.innerHTML='';
   if(!trip.days.length){nd.style.display='';return}nd.style.display='none';
   trip.days.forEach((day,i)=>track.appendChild(makeDayCard(day,i,trip)));
+  resizeClInps(track);
   // Wait for layout then scroll instantly to active day
   setTimeout(()=>scrollToDay(dayIdx,true),50);
 }
@@ -558,7 +560,7 @@ function makeDayCard(day,di,trip){
         <div class="d-sec-t">Map</div>
         ${(()=>{
           const mp=mapPrevHtml(day);
-          if(mp)return`<div class="map-card"><div class="map-prev" id="mp-${day.id}">${mp}</div><div class="map-foot"><span class="map-lbl">Day ${di+1} map</span><button class="map-btn" data-did="${day.id}" data-di="${di}">Change map</button></div></div>`;
+          if(mp)return`<div class="map-card"><div class="map-prev" id="mp-${day.id}" style="cursor:pointer" data-act="open-map" data-did="${day.id}">${mp}</div><div class="map-foot"><span class="map-lbl">Day ${di+1} map</span><div style="display:flex;gap:12px"><button class="map-btn" data-act="del-map" data-did="${day.id}" data-di="${di}">Remove</button><button class="map-btn" data-act="change-map" data-did="${day.id}" data-di="${di}">Change map</button></div></div></div>`;
           return`<div class="map-empty-row" data-did="${day.id}" data-di="${di}"><div class="map-empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><polygon points="1,6 1,22 8,18 16,22 23,18 23,2 16,6 8,2"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg></div><span class="map-empty-lbl"></span><span class="map-empty-add">+ Add Map</span></div>`;
         })()}
       </div>
@@ -574,6 +576,25 @@ function makeDayCard(day,di,trip){
       </div>
     </div>`;
   bindCard(el,day,di,trip);return el;
+}
+
+function showMapViewer(src){
+  const overlay=document.createElement('div');
+  overlay.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.93);display:flex;align-items:center;justify-content:center;overflow:auto;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y pinch-zoom';
+  const img=document.createElement('img');
+  img.src=src;
+  img.style.cssText='max-width:100%;max-height:100%;object-fit:contain;display:block;touch-action:pan-x pan-y pinch-zoom';
+  const closeBtn=document.createElement('button');
+  closeBtn.innerHTML='<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>';
+  closeBtn.style.cssText='position:fixed;top:16px;right:16px;z-index:10000;background:rgba(0,0,0,.55);color:#fff;border:none;border-radius:50%;width:36px;height:36px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0';
+  closeBtn.querySelector('svg').style.cssText='width:14px;height:14px';
+  overlay.appendChild(img);
+  document.body.appendChild(overlay);
+  document.body.appendChild(closeBtn);
+  const close=()=>{overlay.remove();closeBtn.remove();};
+  closeBtn.addEventListener('click',close);
+  overlay.addEventListener('click',e=>{if(e.target===overlay)close();});
+  document.addEventListener('keydown',function esc(e){if(e.key==='Escape'){close();document.removeEventListener('keydown',esc);}});
 }
 
 function mapPrevHtml(day){
@@ -614,50 +635,54 @@ function bindTimeWidget(widget, aid, field, day, di){
   if(!hInp||!mInp||!apBtn)return;
 
   function saveWidget(){
-    const hVal=hInp.value.trim(), mVal=mInp.value.trim();
-    const h=parseInt(hVal)||0, m=parseInt(mVal)||0;
-    if(!hVal||!mVal)return; // not complete yet
+    const hVal=hInp.value.trim();
+    if(!hVal)return; // hour is the only required field
+    const h=parseInt(hVal)||0;
+    const m=parseInt(mInp.value.trim())||0; // default to 0 if empty
     const isPM=apBtn.textContent==='PM';
     let h24=h%12+(isPM?12:0);
-    if(h24===24)h24=12; // 12 PM = 12, not 24
+    if(h24===24)h24=12;
     const val24=`${String(h24).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
     const a=findAct(day,aid);if(!a)return;
     if(a[field]===val24)return;
     a[field]=val24;DB.save();refreshCard(di);
   }
 
-  // Hour field: type 1–2 digits, auto-advance to minutes when 2 digits entered
-  // or when value ≥ 3 (single digit that can't be a valid first digit of a 2-digit hour)
   let hBuf='';
   hInp.addEventListener('keydown',e=>{
     if(e.key>='0'&&e.key<='9'){
       e.preventDefault();
       hBuf+=e.key;
       const n=parseInt(hBuf);
-      // If we have 2 digits, or first digit > 1 (can't form valid 2-digit hour like 20+), advance
       if(hBuf.length===2||(hBuf.length===1&&n>1)){
-        // Clamp to 1–12
-        const clamped=Math.min(Math.max(n,1),12);
-        hInp.value=String(clamped);
+        hInp.value=String(Math.min(Math.max(n,1),12));
         hBuf='';
+        if(!mInp.value.trim())mInp.value='00';
         mInp.focus();mInp.select();
       } else {
         hInp.value=hBuf;
       }
-    } else if(e.key==='Backspace'){
-      hBuf='';hInp.value='';
+    } else if(e.key==='Backspace'||e.key==='Delete'){
+      if(field==='timeEnd'){
+        const a=findAct(day,aid);if(a){a.timeEnd='';DB.save();refreshCard(di);}
+      } else {hBuf='';hInp.value='';}
     } else if(e.key==='Tab'||e.key==='ArrowRight'){
-      e.preventDefault();mInp.focus();mInp.select();
+      e.preventDefault();
+      if(!mInp.value.trim())mInp.value='00';
+      mInp.focus();mInp.select();
     }
   });
-  hInp.addEventListener('blur',()=>{
-    // Normalise on blur
+  hInp.addEventListener('blur',e=>{
     const n=parseInt(hInp.value)||0;
-    if(n)hInp.value=String(Math.min(Math.max(n,1),12));
+    if(n){
+      hInp.value=String(Math.min(Math.max(n,1),12));
+      if(!mInp.value.trim())mInp.value='00';
+      // Don't save+re-render if focus is just moving to another part of this widget
+      if(e.relatedTarget!==mInp&&e.relatedTarget!==apBtn)saveWidget();
+    }
     hBuf='';
   });
 
-  // Minute field: accept 0–59, save on complete
   let mBuf='';
   mInp.addEventListener('keydown',e=>{
     if(e.key>='0'&&e.key<='9'){
@@ -665,17 +690,17 @@ function bindTimeWidget(widget, aid, field, day, di){
       mBuf+=e.key;
       const n=parseInt(mBuf);
       if(mBuf.length===2||(mBuf.length===1&&n>5)){
-        // Clamp 0–59
-        const clamped=Math.min(n,59);
-        mInp.value=String(clamped).padStart(2,'0');
+        mInp.value=String(Math.min(n,59)).padStart(2,'0');
         mBuf='';
         apBtn.focus();
         saveWidget();
       } else {
         mInp.value=mBuf;
       }
-    } else if(e.key==='Backspace'){
-      mBuf='';mInp.value='';
+    } else if(e.key==='Backspace'||e.key==='Delete'){
+      if(field==='timeEnd'){
+        const a=findAct(day,aid);if(a){a.timeEnd='';DB.save();refreshCard(di);}
+      } else {mBuf='';mInp.value='';}
     } else if(e.key==='Tab'||e.key==='ArrowRight'){
       e.preventDefault();apBtn.focus();
     } else if(e.key==='ArrowLeft'){
@@ -683,8 +708,16 @@ function bindTimeWidget(widget, aid, field, day, di){
     }
   });
   mInp.addEventListener('blur',()=>{
-    const n=parseInt(mInp.value);
-    if(!isNaN(n))mInp.value=String(Math.min(Math.max(n,0),59)).padStart(2,'0');
+    const raw=mInp.value.trim();
+    if(!raw){mInp.value='00';}
+    else if(raw.length===1){
+      const d=parseInt(raw)||0;
+      // 1–5: tens place (4→40); 6–9: ones place (6→06)
+      mInp.value=String(Math.min(d<=5?d*10:d,59)).padStart(2,'0');
+    } else {
+      const n=parseInt(raw);
+      if(!isNaN(n))mInp.value=String(Math.min(Math.max(n,0),59)).padStart(2,'0');
+    }
     mBuf='';
     saveWidget();
   });
@@ -736,11 +769,11 @@ function actHtml(a, trip){
 
   const dayOpts=(trip?.days||[]).map((d,i)=>`<option value="${d.id}">${d.date?fmtSW(d.date):'Day '+(i+1)} — ${d.title||'Untitled'}</option>`).join('');
 
-  return`<div class="act-card" data-aid="${a.id}">
+  return`<div class="act-card" data-aid="${a.id}"${!a.timeStart?' data-untimed="1"':''}>
     <div class="act-hdr">
       ${timeBadgeHtml}
       <div class="act-body">
-        <input class="act-title-inp" value="${(a.name||'').replace(/"/g,'&quot;')}" placeholder="Activity name" data-aid="${a.id}">
+        <input class="act-title-inp" value="${(a.name||'').replace(/"/g,'&quot;')}" placeholder="Activity name" data-aid="${a.id}" readonly>
         ${previewNotes}
       </div>
       <div class="act-chev"><svg viewBox="0 0 11 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,1 9,9 2,17"/></svg></div>
@@ -794,7 +827,7 @@ function clHtml(c, fromTrip=false){
   const del=fromTrip?'':`<button class="cl-del" aria-label="Delete">✕</button>`;
   return`<div class="cl-item${fromTrip?' trip-cl-item':''}" data-id="${c.id}"${fromTrip?' data-from-trip="1"':''}>
     <div class="cl-circle${c.done?' done':''}"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1.5,6 4.5,9 10.5,3"/></svg></div>
-    <input class="cl-inp${c.done?' done':''}" value="${c.text.replace(/"/g,'&quot;')}" placeholder="Add item..." data-id="${c.id}"${fromTrip?' readonly':''}>
+    <textarea class="cl-inp${c.done?' done':''}" placeholder="Add item..." data-id="${c.id}" rows="1"${fromTrip?' readonly':''}>${c.text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
     ${badge}${del}
   </div>`;
 }
@@ -820,10 +853,13 @@ function bindCard(el,day,di,trip){
   // Hero area click = pick photo
   el.querySelector(`#dh-area-${di}`).addEventListener('click',e=>{
     if(e.target.closest('.hero-drag')||e.target.closest('.hero-title-inp'))return;
-    el.querySelector(`#hf-${di}`).click();
+    const heroSrc=blobs['dh_'+day.id]||day.heroUrl||'';
+    if(heroSrc){openSheet('sh-hero-photo',{did:day.id,di});}
+    else{el.querySelector(`#hf-${di}`).click();}
   });
   el.querySelector(`#hf-${di}`).addEventListener('change',async function(){
     if(!this.files[0])return;
+    closeSheet();
     const f=this.files[0];
     const path=`hero/${day.id}_${Date.now()}`;
     const {url,blob}=await uploadFile(f,path);
@@ -838,24 +874,42 @@ function bindCard(el,day,di,trip){
     startColDrag(e, di);
   });
 
-  // Activity header toggle (avoid inputs/buttons)
+  // Activity header toggle (avoid textareas/buttons; title input is readonly so click falls through)
   el.querySelectorAll('.act-hdr').forEach(h=>{
     h.addEventListener('click',e=>{
-      if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='BUTTON'||e.target.closest('.act-time-col'))return;
-      const card=h.closest('.act-card'),exp=card.querySelector('.act-exp'),chev=card.querySelector('.act-chev');
+      if(e.target.tagName==='TEXTAREA'||e.target.tagName==='BUTTON'||e.target.closest('.act-time-col'))return;
+      // If already expanded and clicking directly on the title, just focus it for editing
+      const card=h.closest('.act-card');
+      if(e.target.classList.contains('act-title-inp')&&card.querySelector('.act-exp')?.classList.contains('open')){
+        e.target.focus();return;
+      }
+      const exp=card.querySelector('.act-exp'),chev=card.querySelector('.act-chev');
       const was=exp.classList.contains('open');
-      el.querySelectorAll('.act-exp.open').forEach(x=>x.classList.remove('open'));
+      // Close all open panels and restore readonly on their titles
+      el.querySelectorAll('.act-exp.open').forEach(x=>{
+        x.classList.remove('open');
+        x.closest('.act-card')?.querySelector('.act-title-inp')?.setAttribute('readonly','');
+      });
       el.querySelectorAll('.act-chev.open').forEach(x=>x.classList.remove('open'));
-      if(!was){exp.classList.add('open');chev.classList.add('open')}
+      if(!was){
+        exp.classList.add('open');chev.classList.add('open');
+        card.querySelector('.act-title-inp')?.removeAttribute('readonly');
+      }
     });
   });
 
-  // Time badges in header also open expanded
+  // Time badges in header toggle expanded; if opening, focus the time input
   el.querySelectorAll('.act-time-col .act-time-badge').forEach(btn=>{
     btn.addEventListener('click',()=>{
       const card=btn.closest('.act-card'),exp=card.querySelector('.act-exp'),chev=card.querySelector('.act-chev');
-      exp.classList.add('open');chev.classList.add('open');
-      setTimeout(()=>exp.querySelector('.time-native').focus(),200);
+      const was=exp.classList.contains('open');
+      el.querySelectorAll('.act-exp.open').forEach(x=>{x.classList.remove('open');x.closest('.act-card')?.querySelector('.act-title-inp')?.setAttribute('readonly','');});
+      el.querySelectorAll('.act-chev.open').forEach(x=>x.classList.remove('open'));
+      if(!was){
+        exp.classList.add('open');chev.classList.add('open');
+        card.querySelector('.act-title-inp')?.removeAttribute('readonly');
+        setTimeout(()=>exp.querySelector('.time-native')?.focus(),200);
+      }
     });
   });
 
@@ -901,7 +955,25 @@ function bindCard(el,day,di,trip){
     const resize=()=>{ta.style.height='0';ta.style.height=ta.scrollHeight+'px'};resize();
     let t;ta.addEventListener('input',function(){
       resize();
-      clearTimeout(t);t=setTimeout(()=>{const a=findAct(day,this.dataset.aid);if(a){a[this.dataset.field]=this.value;DB.save()}},500);
+      clearTimeout(t);t=setTimeout(()=>{
+        const a=findAct(day,this.dataset.aid);
+        if(a){
+          a[this.dataset.field]=this.value;
+          DB.save();
+          // Keep notes preview in header in sync without full re-render
+          if(this.dataset.field==='notes'){
+            const card=this.closest('.act-card');
+            const body=card?.querySelector('.act-body');
+            if(body){
+              let preview=body.querySelector('.act-notes-preview');
+              if(this.value){
+                if(!preview){preview=document.createElement('div');preview.className='act-notes-preview';body.appendChild(preview);}
+                preview.textContent=this.value;
+              } else if(preview){preview.remove();}
+            }
+          }
+        }
+      },500);
     });
   });
 
@@ -963,6 +1035,13 @@ function bindCard(el,day,di,trip){
     });
   });
 
+  // Image thumbnail tap → view/remove sheet
+  el.querySelectorAll('.act-img').forEach(img=>{
+    img.addEventListener('click',()=>{
+      openSheet('sh-act-img',{aid:img.closest('.act-card')?.dataset.aid,fid:img.dataset.fid,src:img.src,di});
+    });
+  });
+
   // Unified delete for files and links
   el.querySelectorAll('.act-attach-del').forEach(btn=>{
     btn.addEventListener('click',e=>{
@@ -992,9 +1071,110 @@ function bindCard(el,day,di,trip){
     });
   });
 
-  // Map — both the compact empty row and the "Change map" button open the sheet
-  el.querySelectorAll('.map-btn,.map-empty-row').forEach(btn=>{
+  // Drag to reorder unscheduled activities
+  el.querySelectorAll('.act-card[data-untimed]').forEach(card=>{
+    card.addEventListener('pointerdown',e=>{
+      if(card.querySelector('.act-exp')?.classList.contains('open'))return;
+      if(e.target.tagName==='TEXTAREA'||e.target.tagName==='BUTTON'||e.target.tagName==='SELECT'||e.target.tagName==='A'||e.target.closest('.act-time-col'))return;
+      const startY=e.clientY,startX=e.clientX;
+      const cardRect=card.getBoundingClientRect();
+      const offsetY=startY-cardRect.top;
+      const actsWrap=el.querySelector('.acts-wrap');
+      let dragMode=false,ghost=null,indicator=null;
+
+      const getInsertBeforeAid=y=>{
+        for(const c of actsWrap.querySelectorAll('.act-card[data-untimed]')){
+          if(c===card)continue;
+          const r=c.getBoundingClientRect();
+          if(y<r.top+r.height/2)return c.dataset.aid;
+        }
+        return null;
+      };
+
+      const enterDrag=()=>{
+        dragMode=true;
+        document.body.style.userSelect='none';
+        ghost=card.cloneNode(true);
+        ghost.style.cssText=`position:fixed;left:${cardRect.left}px;top:${cardRect.top}px;width:${cardRect.width}px;z-index:9999;opacity:.88;box-shadow:0 8px 28px rgba(0,0,0,.22);border-radius:var(--r);pointer-events:none`;
+        document.body.appendChild(ghost);
+        card.style.opacity='0.25';
+        indicator=document.createElement('div');
+        indicator.style.cssText='position:absolute;left:0;right:0;height:2px;background:var(--accent);border-radius:2px;pointer-events:none;z-index:100;display:none';
+        actsWrap.style.position='relative';
+        actsWrap.appendChild(indicator);
+      };
+
+      const onMove=ev=>{
+        if(!dragMode){
+          if(Math.abs(ev.clientY-startY)>18||Math.abs(ev.clientX-startX)>18)enterDrag();
+          return;
+        }
+        ghost.style.top=(ev.clientY-offsetY)+'px';
+        const wrapRect=actsWrap.getBoundingClientRect();
+        const insertBeforeAid=getInsertBeforeAid(ev.clientY);
+        const untimedCards=[...actsWrap.querySelectorAll('.act-card[data-untimed]')];
+        if(insertBeforeAid){
+          const c=actsWrap.querySelector(`.act-card[data-aid="${insertBeforeAid}"]`);
+          indicator.style.display='block';
+          indicator.style.top=(c.getBoundingClientRect().top-wrapRect.top-1)+'px';
+        } else {
+          const last=untimedCards[untimedCards.length-1];
+          if(last&&last!==card){
+            indicator.style.display='block';
+            indicator.style.top=(last.getBoundingClientRect().bottom-wrapRect.top+1)+'px';
+          } else {indicator.style.display='none';}
+        }
+      };
+
+      const onEnd=ev=>{
+        document.removeEventListener('pointermove',onMove);
+        document.removeEventListener('pointerup',onEnd);
+        document.removeEventListener('pointercancel',onEnd);
+        document.body.style.userSelect='';
+        card.style.opacity='';
+        if(!dragMode)return; // no drag — let the click event fire naturally and expand via act-hdr handler
+        // Drag completed: swallow the click that follows pointerup, then reorder
+        document.addEventListener('click',ev2=>ev2.stopPropagation(),{once:true,capture:true});
+        ghost.remove();indicator.remove();
+        const insertBeforeAid=getInsertBeforeAid(ev.clientY);
+        const actIdx=day.activities.findIndex(a=>a.id===card.dataset.aid);
+        if(actIdx<0)return;
+        const [movedAct]=day.activities.splice(actIdx,1);
+        if(insertBeforeAid){
+          const targetIdx=day.activities.findIndex(a=>a.id===insertBeforeAid);
+          day.activities.splice(targetIdx>=0?targetIdx:day.activities.length,0,movedAct);
+        } else {day.activities.push(movedAct);}
+        DB.save();refreshCard(di);
+      };
+
+      document.addEventListener('pointermove',onMove,{passive:true});
+      document.addEventListener('pointerup',onEnd);
+      document.addEventListener('pointercancel',onEnd);
+    });
+  });
+
+  // Map — empty row and "Change map" button open the upload sheet
+  el.querySelectorAll('[data-act="change-map"],.map-empty-row').forEach(btn=>{
     btn.addEventListener('click',()=>{$('map-file').value='';$('map-prev').innerHTML='';$('map-prev').style.display='none';openSheet('sh-map',{did:day.id,di})});
+  });
+
+  // Map — open fullscreen viewer
+  el.querySelectorAll('[data-act="open-map"]').forEach(prev=>{
+    prev.addEventListener('click',()=>{
+      const img=prev.querySelector('img'),iframe=prev.querySelector('iframe');
+      if(img){showMapViewer(img.src);}
+      else if(iframe){window.open(iframe.src,'_blank','noopener');}
+    });
+  });
+
+  // Map — remove
+  el.querySelectorAll('[data-act="del-map"]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      if(!confirm('Remove this map?'))return;
+      const trip=getTrip(),d=trip.days.find(x=>x.id===btn.dataset.did);if(!d)return;
+      d.mapPdfUrl='';delete blobs['map_'+d.id];delete blobs['map_t_'+d.id];
+      DB.save();refreshCard(parseInt(btn.dataset.di));
+    });
   });
 
   // Checklist toggle — handles both day items and trip-level assigned items
@@ -1010,8 +1190,9 @@ function bindCard(el,day,di,trip){
       c.done=!c.done;DB.save();circle.classList.toggle('done',c.done);inp.classList.toggle('done',c.done);
     });
     if(!fromTrip){
+      const resize=()=>{inp.style.height='0';inp.style.height=inp.scrollHeight+'px'};
       let t;inp.addEventListener('input',function(){
-        clearTimeout(t);t=setTimeout(()=>{const c=findItem();if(c){c.text=this.value;DB.save()}},600);
+        resize();clearTimeout(t);t=setTimeout(()=>{const c=findItem();if(c){c.text=this.value;DB.save()}},600);
       });
       inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();inp.blur()}});
       const delBtn=item.querySelector('.cl-del');
@@ -1028,9 +1209,11 @@ function bindCard(el,day,di,trip){
   el.querySelectorAll('.cl-add').forEach(btn=>{
     btn.addEventListener('click',()=>{
       const row=document.createElement('div');row.className='cl-item';
-      row.innerHTML=`<div class="cl-circle"></div><input class="cl-inp" placeholder="Add an idea or task..." style="flex:1"><button class="cl-del" style="opacity:1">✕</button>`;
+      row.innerHTML=`<div class="cl-circle" style="margin-top:1px"></div><textarea class="cl-inp" placeholder="Add an idea or task..." rows="1"></textarea><button class="cl-del" style="opacity:1;margin-top:-4px">✕</button>`;
       const cl=btn.closest('.checklist');cl.insertBefore(row,btn);
-      const i=row.querySelector('input');i.focus();
+      const i=row.querySelector('textarea');i.focus();
+      const resize=()=>{i.style.height='0';i.style.height=i.scrollHeight+'px'};
+      i.addEventListener('input',resize);
       const commit=()=>{const txt=i.value.trim();if(txt){day.checklist.push({id:uid(),text:txt,done:false});DB.save();refreshCard(di)}else row.remove()};
       i.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();i.blur()}if(e.key==='Escape')row.remove()});
       i.addEventListener('blur',commit);
@@ -1047,6 +1230,7 @@ function refreshCard(di){
   const openActId=old.querySelector('.act-exp.open')?.closest('.act-card')?.dataset.aid||null;
   const newCard=makeDayCard(day,di,trip);
   $('d-track').replaceChild(newCard,old);
+  resizeClInps(newCard);
   // re-open the same activity panel after rebuild
   if(openActId){
     const restoredCard=newCard.querySelector(`.act-card[data-aid="${openActId}"]`);
@@ -1204,7 +1388,7 @@ function renderTripChecklist(trip){
       <div class="cl-circle${item.done?' done':''}">
         <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1.5,6 4.5,9 10.5,3"/></svg>
       </div>
-      <input class="cl-inp${item.done?' done':''}" value="${item.text.replace(/"/g,'&quot;')}" placeholder="Add item..." data-idx="${i}">
+      <textarea class="cl-inp${item.done?' done':''}" placeholder="Add item..." data-idx="${i}" rows="1">${item.text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</textarea>
       <button class="cl-assign${item.dayId?' assigned':''}" data-idx="${i}" title="${item.dayId?'Assigned to '+dayLabel:'Move to a day'}">
         ${item.dayId?'📅 '+dayLabel:'Move to Day →'}
       </button>
@@ -1219,8 +1403,9 @@ function renderTripChecklist(trip){
       inp.classList.toggle('done',item.done);
     });
     // Edit text
+    inp.addEventListener('keydown',e=>{if(e.key==='Enter')e.preventDefault()});
     let t;inp.addEventListener('input',function(){
-      clearTimeout(t);t=setTimeout(()=>{item.text=this.value;DB.save()},600);
+      resize();clearTimeout(t);t=setTimeout(()=>{item.text=this.value;DB.save()},600);
     });
     // Assign to day
     row.querySelector('.cl-assign').addEventListener('click',()=>{
@@ -1231,6 +1416,7 @@ function renderTripChecklist(trip){
       trip.checklist.splice(i,1);DB.save();renderTripChecklist(trip);
     });
     cl.appendChild(row);
+    const inp2=row.querySelector('textarea.cl-inp');if(inp2){inp2.style.height='0';inp2.style.height=inp2.scrollHeight+'px';}
   });
 
   // Add item row
@@ -1238,9 +1424,11 @@ function renderTripChecklist(trip){
   addRow.innerHTML=`<div class="cl-add-icon"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/></svg></div><span class="cl-add-text">Add idea or task</span>`;
   addRow.addEventListener('click',()=>{
     const row=document.createElement('div');row.className='cl-item';
-    row.innerHTML=`<div class="cl-circle"></div><input class="cl-inp" placeholder="Add an idea or task..." style="flex:1"><button class="cl-del" style="opacity:1">✕</button>`;
+    row.innerHTML=`<div class="cl-circle" style="margin-top:1px"></div><textarea class="cl-inp" placeholder="Add an idea or task..." rows="1"></textarea><button class="cl-del" style="opacity:1;margin-top:-4px">✕</button>`;
     cl.insertBefore(row,addRow);
-    const inp=row.querySelector('input');inp.focus();
+    const inp=row.querySelector('textarea');inp.focus();
+    const resizeNew=()=>{inp.style.height='0';inp.style.height=inp.scrollHeight+'px'};
+    inp.addEventListener('input',resizeNew);
     const commit=()=>{
       const text=inp.value.trim();
       if(text){trip.checklist.push({id:uid(),text,done:false,dayId:null});DB.save();renderTripChecklist(trip);}
@@ -1471,9 +1659,9 @@ function bindSheetTimeWidget(widget, onSave){
   if(!hInp||!mInp||!apBtn)return;
 
   function save(){
-    const hv=hInp.value.trim(),mv=mInp.value.trim();
-    if(!hv||!mv)return;
-    const h=parseInt(hv)||0,m=parseInt(mv)||0;
+    const hv=hInp.value.trim();
+    if(!hv)return; // hour is the only required field
+    const h=parseInt(hv)||0,m=parseInt(mInp.value.trim())||0;
     const isPM=apBtn.textContent==='PM';
     let h24=h%12+(isPM?12:0);
     if(h24===24)h24=12;
@@ -1487,12 +1675,21 @@ function bindSheetTimeWidget(widget, onSave){
       const n=parseInt(hBuf);
       if(hBuf.length===2||(hBuf.length===1&&n>1)){
         hInp.value=String(Math.min(Math.max(n,1),12));hBuf='';
+        if(!mInp.value.trim())mInp.value='00';
         mInp.focus();mInp.select();
       } else hInp.value=hBuf;
     } else if(e.key==='Backspace'){hBuf='';hInp.value='';}
-    else if(e.key==='Tab'||e.key==='ArrowRight'){e.preventDefault();mInp.focus();mInp.select();}
+    else if(e.key==='Tab'||e.key==='ArrowRight'){e.preventDefault();if(!mInp.value.trim())mInp.value='00';mInp.focus();mInp.select();}
   });
-  hInp.addEventListener('blur',()=>{const n=parseInt(hInp.value)||0;if(n)hInp.value=String(Math.min(Math.max(n,1),12));hBuf='';});
+  hInp.addEventListener('blur',e=>{
+    const n=parseInt(hInp.value)||0;
+    if(n){
+      hInp.value=String(Math.min(Math.max(n,1),12));
+      if(!mInp.value.trim())mInp.value='00';
+      if(e.relatedTarget!==mInp&&e.relatedTarget!==apBtn)save();
+    }
+    hBuf='';
+  });
 
   let mBuf='';
   mInp.addEventListener('keydown',e=>{
@@ -1507,7 +1704,18 @@ function bindSheetTimeWidget(widget, onSave){
     else if(e.key==='Tab'||e.key==='ArrowRight'){e.preventDefault();apBtn.focus();}
     else if(e.key==='ArrowLeft'){e.preventDefault();hInp.focus();hInp.select();}
   });
-  mInp.addEventListener('blur',()=>{const n=parseInt(mInp.value);if(!isNaN(n))mInp.value=String(Math.min(Math.max(n,0),59)).padStart(2,'0');mBuf='';save();});
+  mInp.addEventListener('blur',()=>{
+    const raw=mInp.value.trim();
+    if(!raw){mInp.value='00';}
+    else if(raw.length===1){
+      const d=parseInt(raw)||0;
+      mInp.value=String(Math.min(d<=5?d*10:d,59)).padStart(2,'0');
+    } else {
+      const n=parseInt(raw);
+      if(!isNaN(n))mInp.value=String(Math.min(Math.max(n,0),59)).padStart(2,'0');
+    }
+    mBuf='';save();
+  });
 
   apBtn.addEventListener('click',()=>{apBtn.textContent=apBtn.textContent==='PM'?'AM':'PM';save();});
   apBtn.addEventListener('keydown',e=>{
@@ -1607,6 +1815,33 @@ $('map-save').addEventListener('click',async()=>{
     blobs['map_t_'+day.id]=f.type.startsWith('image/')?'img':'pdf';
   }
   DB.save();closeSheet();setTimeout(()=>refreshCard(ctx.di!=null?ctx.di:dayIdx),300);
+});
+
+// ── Activity image sheet ──────────────────────────────
+$('act-img-view').addEventListener('click',()=>{
+  const src=ctx.src;closeSheet();
+  if(src)showMapViewer(src);
+});
+$('act-img-remove').addEventListener('click',()=>{
+  const trip=getTrip();if(!trip)return;
+  const di=ctx.di,aid=ctx.aid,fid=ctx.fid;
+  const day=trip.days[di];if(!day)return;
+  const act=day.activities.find(a=>a.id===aid);if(!act)return;
+  if(!act.files)act.files=act.images||[];
+  act.files=act.files.filter(f=>f!==fid);
+  DB.save();closeSheet();refreshCard(di);
+});
+
+// ── Hero photo sheet ──────────────────────────────────
+$('hero-photo-replace').addEventListener('click',()=>{
+  const di=ctx.di!=null?ctx.di:dayIdx;
+  document.querySelector(`#hf-${di}`)?.click();
+});
+$('hero-photo-remove').addEventListener('click',()=>{
+  const trip=getTrip(),day=trip?.days.find(d=>d.id===ctx.did);if(!day)return;
+  day.heroUrl='';delete blobs['dh_'+day.id];
+  DB.save();closeSheet();
+  setTimeout(()=>refreshCard(ctx.di!=null?ctx.di:dayIdx),300);
 });
 
 // ── Service Worker ────────────────────────────────────

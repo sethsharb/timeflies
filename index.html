@@ -321,6 +321,26 @@ CREATE POLICY "open" ON app_data FOR ALL USING (true) WITH CHECK (true);</div>
   <div class="sh-actions"><button class="btn-s" id="map-cancel">Cancel</button><button class="btn-p" id="map-save">Save Map</button></div>
 </div>
 
+<!-- SHEET: ACTIVITY IMAGE OPTIONS -->
+<div class="sheet" id="sh-act-img">
+  <div class="sh-handle"></div>
+  <div class="sh-title">Photo</div>
+  <div class="sh-actions" style="flex-direction:column;gap:10px">
+    <button class="btn-p" id="act-img-view">View Photo</button>
+    <button class="btn-s" id="act-img-remove" style="color:var(--danger,#ff3b30)">Remove Photo</button>
+  </div>
+</div>
+
+<!-- SHEET: HERO PHOTO OPTIONS -->
+<div class="sheet" id="sh-hero-photo">
+  <div class="sh-handle"></div>
+  <div class="sh-title">Banner Photo</div>
+  <div class="sh-actions" style="flex-direction:column;gap:10px">
+    <button class="btn-p" id="hero-photo-replace">Replace Photo</button>
+    <button class="btn-s" id="hero-photo-remove" style="color:var(--danger,#ff3b30)">Remove Photo</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="app.js" defer></script>
